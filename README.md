@@ -1,27 +1,29 @@
-# Dockerfile PostgreSQL
+# BedquiltDB Example Dockerfile
 
 ## Info
 
-This Dockerfile creates a container running PostgreSQL 9.3
+This Dockerfile creates a container running PostgreSQL 9.4 and BedquiltDB.
 
-Here's what it does in particular:
+Here is a summary of what happens:
 
 - Install PostgreSQL
-- exposing it on port `5432`
-- initializes a database in `/data`
-- inserts a superuser in the database: `docker:docker` (change in the Dockerfile)
+- Exposes the `postgres` service on port `5432`
+- Initializes a database in `/data`
+- Installs the `bedquilt` extension
+- Inserts a superuser in the database: `docker:docker` (change in the Dockerfile)
+- Enables the `bedquilt` extension on the default `postgres` database
 
 
 ## Install
 
-- `docker build -t "postgresql9.3" .`
-- `docker run -d postgresql9.3`
+- `docker build -t "bedquiltdb_example" .`
+- `docker run -d bedquiltdb_example --name bq`
 
 
 ## Persistance
 
 You can mount the database directory as a volume to persist your data:
 
-`docker run -p 127.0.0.1:5432:5432 -v /data/pg:/data -name pg postgresql9.3`
+`docker run -d -v /data/pg:/data --name bq bedquiltdb_example`
 
 But before you can do so you first need to create the source folder: `mkdir -p /data/pg`
