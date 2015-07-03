@@ -1,7 +1,5 @@
 # BedquiltDB Example Dockerfile
 
-## Info
-
 This Dockerfile creates a container running PostgreSQL 9.4 and BedquiltDB.
 
 Here is a summary of what happens:
