@@ -17,6 +17,18 @@ Here is a summary of what happens:
 - `docker build -t "bedquiltdb_example" .`
 - `docker run -d bedquiltdb_example --name bq`
 
+You can then connect to the postgres instance running inside the container,
+or just get a `psql` shell for experimenting with:
+
+```bash
+$ docker exec -it bedquiltdb_example bash
+root@1234 su postgres
+postgres@1234 psql
+psql (9.4.5)
+Type "help" for help.
+
+postgres=#
+```
 
 ## Persistance
 

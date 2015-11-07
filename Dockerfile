@@ -33,9 +33,9 @@ ADD pg_hba.conf     /etc/postgresql/9.4/main/
 ADD pg_ident.conf   /etc/postgresql/9.4/main/
 ADD postgresql.conf /etc/postgresql/9.4/main/
 
-ADD bedquilt-0.3.0/ /tmp/bedquilt-0.3.0/
+ADD bedquilt-package /tmp/bedquilt-package
 
-RUN cd /tmp/bedquilt-0.3.0 && make install
+RUN cd /tmp/bedquilt-package && make install
 
 
 # main entry

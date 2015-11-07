@@ -1,5 +1,7 @@
 # API Docs
 
+This document is auto-generated from the core `bedquilt` source code, and describes the low-level SQL API of BedquiltDB.
+
 ---- ---- ---- ----
 
 
@@ -130,7 +132,7 @@ find one
 
 ## bq\_find
 
-- params: `i_coll text, i_json_query json`
+- params: `i_coll text, i_json_query json, i_skip integer DEFAULT 0, i_limit integer DEFAULT null, i_sort json DEFAULT null`
 - returns: `table(bq_jdoc json)`
 - language: `plpgsql`
 

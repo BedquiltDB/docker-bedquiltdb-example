@@ -6,8 +6,8 @@
 /* Add a set of constraints to the collection.
  * The supplied json document should be in the form {field: constraint_spec},
  * for example:
- *   {"age": {"$required": 1,
- *            "$notnull": 1,
+ *   {"age": {"$required": true,
+ *            "$notnull": true,
  *            "$type": "number"}}
  * Valid constraints are: $required, $notnull and $type.
  * - {$required: 1} : the field must be present in all documents
@@ -42,15 +42,15 @@ BEGIN
       -- $required : the key must be present in the json object
       WHEN '$required' THEN
         new_constraint_name := format(
-          'bqcn__%s__required',
-          bq_safe_path(field_name));
+          'bqcn:%s:required',
+          field_name);
         PERFORM bq_create_collection(i_coll);
         IF bq_constraint_name_exists(i_coll, new_constraint_name) = false
         THEN
           IF field_name LIKE '%.%' THEN
             EXECUTE format(
               'alter table %I
-              add constraint %s
+              add constraint "%s"
               check (bq_path_exists(''%s'', bq_jdoc));',
               i_coll,
               new_constraint_name,
@@ -59,7 +59,7 @@ BEGIN
           ELSE
             EXECUTE format(
               'alter table %I
-              add constraint %s
+              add constraint "%s"
               check (bq_jdoc ? ''%s'');',
               i_coll,
               new_constraint_name,
@@ -70,14 +70,14 @@ BEGIN
       -- $notnull : the key must be present in the json object
       WHEN '$notnull' THEN
         new_constraint_name := format(
-          'bqcn__%s__notnull',
-          bq_safe_path(field_name));
+          'bqcn:%s:notnull',
+          field_name);
         PERFORM bq_create_collection(i_coll);
         IF bq_constraint_name_exists(i_coll, new_constraint_name) = false
         THEN
           EXECUTE format(
             'alter table %I
-            add constraint %s
+            add constraint "%s"
             check (
               jsonb_typeof((bq_jdoc#>''%s'')::jsonb) <> ''null''
             );',
@@ -92,8 +92,8 @@ BEGIN
       WHEN '$type' THEN
         s_type := spec->>op;
         new_constraint_name := format(
-          'bqcn__%s__type__%s',
-          bq_safe_path(field_name), s_type);
+          'bqcn:%s:type:%s',
+          field_name, s_type);
         PERFORM bq_create_collection(i_coll);
         IF bq_constraint_name_exists(i_coll, new_constraint_name) = false
         THEN
@@ -109,9 +109,9 @@ BEGIN
             SELECT constraint_name
             FROM information_schema.constraint_column_usage
             WHERE table_name = i_coll
-            AND constraint_name LIKE 'bqcn__'
-            || bq_safe_path(field_name)
-            ||'__type__%')
+            AND constraint_name LIKE 'bqcn:'
+            || field_name
+            ||':type:%')
           THEN
             RAISE EXCEPTION
             'Contradictory $type "%" constraint on field "%"',
@@ -120,7 +120,7 @@ BEGIN
           END IF;
           EXECUTE format(
             'alter table %I
-            add constraint %s
+            add constraint "%s"
             check (
               jsonb_typeof(bq_jdoc#>''%s'') in (''%s'', ''null'')
             );',
@@ -184,13 +184,13 @@ BEGIN
       CASE op
       WHEN '$required' THEN
         target_constraint := format(
-          'bqcn__%s__required',
+          'bqcn:%s:required',
           field_name);
         IF bq_constraint_name_exists(i_coll, target_constraint)
         THEN
           EXECUTE format(
             'alter table %I
-            drop constraint %s;',
+            drop constraint "%s";',
             i_coll,
             target_constraint
           );
@@ -199,13 +199,13 @@ BEGIN
 
       WHEN '$notnull' THEN
         target_constraint := format(
-          'bqcn__%s__notnull',
+          'bqcn:%s:notnull',
           field_name);
         IF bq_constraint_name_exists(i_coll, target_constraint)
         THEN
           EXECUTE format(
             'alter table %I
-            drop constraint %s;',
+            drop constraint "%s";',
             i_coll,
             target_constraint
           );
@@ -215,13 +215,13 @@ BEGIN
       WHEN '$type' THEN
         s_type := spec->>op;
         target_constraint := format(
-          'bqcn__%s__type__%s',
+          'bqcn:%s:type:%s',
           field_name, s_type);
         IF bq_constraint_name_exists(i_coll, target_constraint)
         THEN
           EXECUTE format(
             'alter table %I
-            drop constraint %s;',
+            drop constraint "%s";',
             i_coll,
             target_constraint
           );
@@ -243,15 +243,11 @@ CREATE OR REPLACE FUNCTION bq_list_constraints(i_coll text)
 RETURNS setof text AS $$
 BEGIN
 RETURN QUERY SELECT
-  replace(
-    replace(substring(constraint_name from 7),
-            '__',
-            ':'),
-    '_',
-    '.')
+  substring(constraint_name from 6)::text
   FROM information_schema.constraint_column_usage
   WHERE table_name = i_coll
-  AND constraint_name LIKE 'bqcn_%';
+  AND constraint_name LIKE 'bqcn:%'
+  order by 1;
 END
 $$ LANGUAGE plpgsql;
 -- # -- # -- # -- # -- #
@@ -358,17 +354,37 @@ $$ LANGUAGE plpgsql;
 
 /* find many documents
  */
-CREATE OR REPLACE FUNCTION bq_find(i_coll text, i_json_query json)
+CREATE OR REPLACE FUNCTION bq_find(i_coll text, i_json_query json, i_skip integer DEFAULT 0, i_limit integer DEFAULT null, i_sort json DEFAULT null)
 RETURNS table(bq_jdoc json) AS $$
+DECLARE
+  q text = format('select bq_jdoc::json from %I where 1=1', i_coll);
 BEGIN
 IF (SELECT bq_collection_exists(i_coll))
 THEN
-    RETURN QUERY EXECUTE format(
-        'SELECT bq_jdoc::json FROM %I
-        WHERE bq_jdoc @> (%s)::jsonb',
-        i_coll,
-        quote_literal(i_json_query)
-    );
+    IF json_typeof(i_sort) != 'array'
+    THEN
+      RAISE EXCEPTION
+      'Invalid sort parameter json type "%s"', json_typeof(i_sort)
+      USING HINT = 'The i_sort parameter to bq_find should be a json array';
+    END IF;
+    -- query match
+    q := q || format(' and bq_jdoc @> (%s)::jsonb ',
+                     quote_literal(i_json_query));
+    -- sort
+    IF (i_sort IS NOT NULL)
+    THEN
+      q := q || format(' %s ', bq_sort_to_text(i_sort));
+    END IF;
+    -- skip and limit
+    IF (i_limit IS NOT NULL)
+    THEN
+      q := q || format(' limit %s ', i_limit);
+    ELSE
+      q := q || format(' limit NULL ');
+    END IF;
+    -- final query
+    q := q || format(' offset %s ', i_skip);
+    RETURN QUERY EXECUTE q;
 END IF;
 END
 $$ LANGUAGE plpgsql;
@@ -497,28 +513,15 @@ DECLARE
   o_id text;
   existing_id_count integer;
 BEGIN
-PERFORM bq_create_collection(i_coll);
-IF (SELECT i_jdoc->'_id') IS NOT NULL
-THEN
-  EXECUTE format('select count(*) from %I where _id = %s',
-                 i_coll, quote_literal(i_jdoc->>'_id'))
-    INTO existing_id_count;
-  IF existing_id_count > 0
-    THEN
-      EXECUTE format('
-      UPDATE %I SET bq_jdoc = %s::jsonb WHERE _id = %s returning _id',
-      i_coll,
-      quote_literal(i_jdoc),
-      quote_literal(i_jdoc->>'_id')) INTO o_id;
-      RETURN o_id;
-    ELSE
-      SELECT bq_insert(i_coll, i_jdoc) INTO o_id;
-      RETURN o_id;
-    END IF;
-ELSE
   SELECT bq_insert(i_coll, i_jdoc) INTO o_id;
   RETURN o_id;
-END IF;
+EXCEPTION WHEN unique_violation THEN
+  EXECUTE format('
+    UPDATE %I SET bq_jdoc = %s::jsonb WHERE _id = %s returning _id',
+    i_coll,
+    quote_literal(i_jdoc),
+    quote_literal(i_jdoc->>'_id')) INTO o_id;
+  RETURN o_id;
 END
 $$ LANGUAGE plpgsql;
 -- # -- # -- # -- # -- #
@@ -590,16 +593,6 @@ END
 $$ LANGUAGE plpgsql;
 
 
-/* private - replace dots in path string with underscores
- */
-CREATE OR REPLACE FUNCTION bq_safe_path(i_path text)
-RETURNS text AS $$
-BEGIN
-  RETURN replace(i_path, '.', '_');
-END
-$$ LANGUAGE plpgsql;
-
-
 /* private - Check if a dotted path exists in a document
  */
 CREATE OR REPLACE FUNCTION bq_path_exists(i_path text, i_jdoc jsonb)
@@ -640,3 +633,63 @@ BEGIN
 
 END
 $$ language plpgsql;
+
+
+/* private - transform a json sort spec into an 'ORDER BY...' string
+ */
+CREATE OR REPLACE FUNCTION bq_sort_to_text(i_sort json)
+RETURNS text AS $$
+DECLARE
+  sort_spec json;
+  pair RECORD;
+  dotted_path text;
+  path_array text[];
+  direction text = 'ASC';
+  o_query text;
+BEGIN
+  o_query := 'order by ';
+  for sort_spec in select value from json_array_elements(i_sort) loop
+    for pair in select * from json_each(sort_spec) limit 1 loop
+      dotted_path := pair.key;
+      if (pair.value::text = '-1')
+      then
+        direction := 'DESC';
+      elsif (pair.value::text = '1')
+      then
+        direction := 'ASC';
+      else
+        raise exception 'Invalid sort direction "%s"', pair.value::text
+        using hint = 'sort direction must be either 1 (ascending) or -1 (descending)';
+      end if;
+      path_array := regexp_split_to_array(dotted_path, '\.');
+      o_query := o_query || format(' bq_jdoc#>''%s'' %s, ', path_array, direction);
+    end loop;
+  end loop;
+  o_query := o_query || ' updated ';
+  return o_query;
+END
+$$ LANGUAGE plpgsql;
+
+
+/* private - raise an exception if the extension version is less than
+ * the supplied version.
+ */
+CREATE OR REPLACE FUNCTION bq_assert_minimum_version(i_version text)
+RETURNS boolean AS $$
+DECLARE
+  version text;
+BEGIN
+  select extversion from pg_catalog.pg_extension
+  where extname = 'bedquilt'
+  into version;
+  if version = 'HEAD' then
+    return true;
+  end if;
+  if version < i_version then
+    raise exception
+    'Bedquilt extension version (%) less than %', version, i_version
+    using hint = 'Update the bedquilt extension to a newer version';
+  end if;
+  return true;
+END
+$$ LANGUAGE plpgsql;
