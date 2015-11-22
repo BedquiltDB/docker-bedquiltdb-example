@@ -17,8 +17,8 @@ This document is auto-generated from the core `bedquilt` source code, and descri
 Add a set of constraints to the collection.
 The supplied json document should be in the form {field: constraint_spec},
 for example:
-  {"age": {"$required": 1,
-           "$notnull": 1,
+  {"age": {"$required": true,
+           "$notnull": true,
            "$type": "number"}}
 Valid constraints are: $required, $notnull and $type.
 - {$required: 1} : the field must be present in all documents
@@ -151,6 +151,20 @@ find many documents
 
 ```markdown
 count documents in collection
+
+```
+
+
+
+## bq\_distinct
+
+- params: `i_coll text, i_key_path text`
+- returns: `table(val jsonb)`
+- language: `plpgsql`
+
+```markdown
+Get a sequence of the distinct values present in the collection for a given key,
+example: bq_distinct('people', 'address.city')
 
 ```
 
