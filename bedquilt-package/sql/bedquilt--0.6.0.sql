@@ -351,6 +351,29 @@ END IF;
 END
 $$ LANGUAGE plpgsql;
 
+-- find many by ids
+CREATE OR REPLACE FUNCTION bq_find_many_by_ids(i_coll text, i_ids jsonb)
+RETURNS table(bq_jdoc json) AS $$
+BEGIN
+  IF (SELECT bq_collection_exists(i_coll))
+  THEN
+    IF jsonb_typeof(i_ids) != 'array'
+    THEN
+      RAISE EXCEPTION
+      'Invalid ids parameter "%s"', json_typeof(i_ids)
+      USING HINT = 'ids should be a json array of strings';
+    END IF;
+    RETURN QUERY EXECUTE format(
+      'SELECT bq_jdoc::json FROM %I
+      WHERE _id = ANY(array(select jsonb_array_elements_text(''%s''::jsonb)))
+      ORDER BY created ASC;',
+      i_coll,
+      i_ids
+    );
+  END IF;
+END
+$$ LANGUAGE plpgsql;
+
 
 /* find many documents
  */
@@ -409,6 +432,26 @@ THEN
 ELSE
   return 0;
 END IF;
+END
+$$ LANGUAGE plpgsql;
+
+
+/* Get a sequence of the distinct values present in the collection for a given key,
+ * example: bq_distinct('people', 'address.city')
+ */
+CREATE OR REPLACE FUNCTION bq_distinct(i_coll text, i_key_path text)
+RETURNS table(val jsonb) AS $$
+DECLARE
+  path_array text[];
+BEGIN
+  path_array := regexp_split_to_array(i_key_path, '\.');
+  IF (SELECT bq_collection_exists(i_coll))
+  THEN
+    RETURN QUERY EXECUTE format(
+      'select distinct (bq_jdoc#>''%s'')::jsonb as val from %I',
+      path_array, i_coll
+    );
+  END IF;
 END
 $$ LANGUAGE plpgsql;
 -- # -- # -- # -- # -- #

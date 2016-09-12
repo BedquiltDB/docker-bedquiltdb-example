@@ -7,7 +7,7 @@ PostgreSQL extension.
 BedquiltDB is a JSON document store built on top of PostgreSQL. It combines the
 ease-of-use of NoSQL document stores with the integrity and stability of PostgreSQL.
 
-You should probably start with the [General Concepts](guide/concepts.md)
+You should probably start with the [Overview](guide/overview.md)
 section of the [BedquiltDB Guide](guide/index.md) .
 
 ```python
@@ -37,8 +37,6 @@ on [github](https://github.com/BedquiltDB).
 
 ### [BedquiltDB Guide](guide/index.md)
 
-### [Getting Started](getting_started.md)
+### [Spec](spec.md)
 
 ### [Core API](api_docs.md)
-
-### [Spec](spec.md)
